@@ -1,0 +1,5 @@
+(* OASIS_START *)
+(* DO NOT EDIT (digest: 2f4580ee5e757076f178c1cfb4d85b4f) *)
+Authors of scaml
+Yury Sulsky
+(* OASIS_STOP *)

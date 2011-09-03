@@ -1,0 +1,10 @@
+# OASIS_START
+# DO NOT EDIT (digest: 6e17cc8ffce06b172fa6961026503c46)
+version = "0.0.1"
+description = "Embedded LISP interpreter"
+requires = "sexplib.syntax sexplib core threads"
+archive(byte) = "scaml.cma"
+archive(native) = "scaml.cmxa"
+exists_if = "scaml.cma"
+# OASIS_STOP
+

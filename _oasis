@@ -1,0 +1,37 @@
+OASISFormat:  0.2
+OCamlVersion: >= 3.12
+Name:         scaml
+Version:      0.0.1
+Synopsis:     Embedded LISP interpreter
+Authors:      Yury Sulsky
+#Copyrights:   (C) 2011 Yury Sulsky
+License:      LGPL-2.1 with OCaml linking exception
+#LicenseFile:  LICENSE
+#Copyrights:
+#Licence:
+#LicenceFile:
+Plugins:      StdFiles (0.2),
+              DevFiles (0.2),
+              META (0.2)
+BuildTools:   ocamlbuild
+Description:  Embedded LISP interpreter
+FindlibVersion: >= 1.2.7
+#XStdFilesAUTHORS: false
+#XStdFilesINSTALLFilename: INSTALL
+#XStdFilesREADME: false
+
+Library scaml
+  Path:        lib
+  FindlibName: scaml
+ # Pack:        true
+  Modules:Interpreter,Procedure,Univ,Uvar,Env,Undefined
+  BuildDepends: sexplib.syntax,
+                sexplib,
+                core,threads
+
+Executable standalone
+  Path:       bin
+  MainIs:     standalone.ml
+  BuildDepends: core, scaml
+
+#Document "scaml"

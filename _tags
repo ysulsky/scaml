@@ -1,0 +1,22 @@
+# OASIS_START
+# DO NOT EDIT (digest: 3dd279320e677c3bc7f59824d3fd748e)
+# Library scaml
+"lib": include
+<lib/*.ml{,i}>: pkg_threads
+<lib/*.ml{,i}>: pkg_sexplib.syntax
+<lib/*.ml{,i}>: pkg_sexplib
+<lib/*.ml{,i}>: pkg_core
+# Executable standalone
+"bin/standalone.byte": use_scaml
+"bin/standalone.byte": pkg_threads
+"bin/standalone.byte": pkg_sexplib.syntax
+"bin/standalone.byte": pkg_sexplib
+"bin/standalone.byte": pkg_core
+<bin/*.ml{,i}>: use_scaml
+<bin/*.ml{,i}>: pkg_threads
+<bin/*.ml{,i}>: pkg_sexplib.syntax
+<bin/*.ml{,i}>: pkg_sexplib
+<bin/*.ml{,i}>: pkg_core
+# OASIS_STOP
+<lib/*.ml{,i}>: syntax_camlp4o
+<lib/*.ml{,i}>: annot
