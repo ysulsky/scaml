@@ -12,7 +12,6 @@ val of_alist : (string * Univ.t) list -> t
 
 val add     : t -> string -> Univ.t -> t
 val add_ref : t -> string -> Univ.t ref -> t
-val add_proc : t -> Procedure.t -> t
 
 val get         : t -> string -> Univ.t option
 val get_exn     : t -> string -> Univ.t

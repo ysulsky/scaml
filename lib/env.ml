@@ -14,10 +14,8 @@ let of_alist =
 let combine ~initial ~additional =
   String.Map.fold ~init:initial ~f:String.Map.add additional
 
-let add_ref t s v = String.Map.add t ~key:s ~data:v
-let add     t s v = add_ref t s (ref v)
-let add_proc t proc = 
-  add t (":"^Procedure.name proc) (Univ.create Procedure.uvar proc)
+let add_ref  t s v = String.Map.add t ~key:s ~data:v
+let add      t s v = add_ref t s (ref v)
  
 let get_ref     t s = String.Map.find t s
 let get_ref_exn t s = value ~ident:s (get_ref t s)

@@ -3,12 +3,9 @@ open Core.Std
 exception Not_a_procedure of Sexp.t with sexp
 exception Syntax_error    of Sexp.t * string with sexp
 exception Type_error      of Sexp.t * [`expected of string] with sexp
-exception Duplicate_argument_name 
-  of [`procedure of string] * string with sexp
+exception Duplicate_identifier of Identifier.t * Sexp.t with sexp
 exception Statement_should_return_unit 
   of [`statement of Sexp.t] * [`in_body of Sexp.t] with sexp
-
-let is_ident s = String.length s > 0 && s.[0] = ':'
 
 module Primitive = struct
   type t = Lambda | Begin | Let | Let_star | Let_rec | If | Set
@@ -24,8 +21,11 @@ module Primitive = struct
         "if",     If;
         "set!",   Set;
       ]) in
-    let p2 name f inputs output = Procedure.create2 ~name ~inputs ~output f in
-    List.fold ~init:prims ~f:Env.add_proc [
+    let p2 name f inputs output = 
+      name, 
+      Univ.create Procedure.uvar (Procedure.create2 ~name ~inputs ~output f)
+    in
+    List.fold ~init:prims ~f:(fun env (name, fn) -> Env.add env name fn) [
       p2 "%+"  ( +  ) (Uvar.int,   Uvar.int)   Uvar.int;
       p2 "%-"  ( -  ) (Uvar.int,   Uvar.int)   Uvar.int;
       p2 "%*"  ( *  ) (Uvar.int,   Uvar.int)   Uvar.int;
@@ -43,15 +43,19 @@ let parse_let ~prim ~sexp =
   in
   function
   | (Sexp.List decls) :: body1 :: body_rest ->
-    List.fold_right decls ~init:[] ~f:(fun x acc ->
-      match x with
-      | Sexp.List [Sexp.Atom var; value] when is_ident var ->
-        (var, value) :: acc
-      | _ -> raise (usage ())),
-    body1, body_rest
+    let _idents, decls =
+      List.fold_right decls ~init:(Identifier.Set.empty, []) 
+        ~f:(fun x (ids, acc) ->
+          match x with
+          | Sexp.List [Sexp.Atom var; value] ->
+            let ident = Identifier.of_string var in
+            if Identifier.Set.mem ids ident then
+              raise (Duplicate_identifier (ident, sexp));
+            Identifier.Set.add ids ident, 
+            (ident, value) :: acc
+          | _ -> raise (usage ()))
+    in decls, body1, body_rest
   | _ -> raise (usage ())
-
-let lambda_counter = ref 0
 
 let rec eval env = function
 | Sexp.List (Sexp.Atom prim :: body) as sexp ->
@@ -63,8 +67,7 @@ let rec eval env = function
 
 and eval_no_prim env = function
 (* CR ysulsky: this atom parsing is terrible *)
-| Sexp.Atom var when is_ident var -> Env.get_exn env var
-| Sexp.Atom ""         -> Univ.create Uvar.string ""
+| Sexp.Atom var when Identifier.is_valid var -> Env.get_exn env var
 | Sexp.Atom "#t"       -> Univ.create Uvar.bool true
 | Sexp.Atom "#f"       -> Univ.create Uvar.bool false
 | Sexp.Atom "%env"     -> Univ.create Env.uvar env
@@ -73,6 +76,11 @@ and eval_no_prim env = function
     try Univ.create Uvar.float (Float.of_string atom) with _ ->
       Univ.create Uvar.string atom)
 | Sexp.List []         -> Univ.create Uvar.unit ()
+| Sexp.List ((Sexp.Atom fn_name as fn)::args) ->
+  (* remove this case when we have a better lexer *)
+  (match Univ.get Procedure.uvar (Env.get_exn env fn_name) with
+  | None    -> raise (Not_a_procedure fn)
+  | Some fn -> Procedure.apply fn (List.map ~f:(eval env) args))
 | Sexp.List (fn::args) ->
   (match Univ.get Procedure.uvar (eval env fn) with
   | None    -> raise (Not_a_procedure fn)
@@ -86,9 +94,11 @@ and eval_prim env prim body =
     let usage () = Syntax_error (sexp, "usage: (lambda args body ...)") in
     begin match body with
     | args :: body ->
-      let name = incr lambda_counter; sprintf "<lambda#%d>" !lambda_counter in
-      let proc = make_proc ~name ~usage env args body in
-      Univ.create Procedure.uvar proc
+      let required, rest, body1, body_rest = 
+        parse_lambda ~usage ~sexp args body 
+      in
+      Univ.create Procedure.uvar
+        (make_proc ~sexp env required rest body1 body_rest)
     | _ -> raise (usage ())
     end
   | Primitive.Begin ->
@@ -104,18 +114,36 @@ and eval_prim env prim body =
     end
   | Primitive.Set ->
     begin match body with
-    | [Sexp.Atom var; value] when is_ident var -> eval_set env ~var ~value
+    | [Sexp.Atom var; value] when Identifier.is_valid var -> 
+      eval_set env ~var ~value
     | _ -> raise (Syntax_error (sexp, "usage: (set! :<var> <value>)"))
     end
   | Primitive.Let ->
+    let name, body =
+      match body with
+      | Sexp.Atom name :: ((Sexp.List _decls)::_rest as body) ->
+        Some (Identifier.of_string name), body
+      | _ -> None, body
+    in
     let decls, body1, body_rest = parse_let ~prim ~sexp body in
-    let env = List.fold decls ~init:env ~f:(fun env' (var, value) ->
-      Env.add env' var (eval env value))
-    in eval_progn ~sexp env body1 body_rest
+    (match name with
+    | None ->
+      let env = List.fold decls ~init:env ~f:(fun env' (var, value) ->
+        Env.add env' (var :> string) (eval env value))
+      in eval_progn ~sexp env body1 body_rest
+    | Some name ->
+      let r    = ref Undefined.uval in
+      let env  = Env.add_ref env (name :> string) r in
+      let proc = 
+        make_proc ~name:(name :> string) ~sexp 
+          env (List.map ~f:fst decls) None body1 body_rest
+      in
+      r := Univ.create Procedure.uvar proc;
+      Procedure.apply proc (List.map decls ~f:(fun (_, value) -> (eval env value))))
   | Primitive.Let_star ->
     let decls, body1, body_rest = parse_let ~prim ~sexp body in
     let env = List.fold decls ~init:env ~f:(fun env  (var, value) ->
-      Env.add env  var (eval env value))
+      Env.add env  (var :> string) (eval env value))
     in eval_progn ~sexp env body1 body_rest
   | Primitive.Let_rec ->
     let decls, body1, body_rest = parse_let ~prim ~sexp body in
@@ -123,7 +151,7 @@ and eval_prim env prim body =
       List.fold_right decls ~init:(env, [])
         ~f:(fun (ident, value) (env, values) -> 
           let r = ref Undefined.uval in 
-          Env.add_ref env ident r,
+          Env.add_ref env (ident :> string) r,
           (r, value) :: values)
     in
     List.iter values ~f:(fun (ref, value) -> ref := eval env value);
@@ -152,11 +180,11 @@ and eval_progn ~sexp env body1 body_rest =
     | None -> 
       raise (Statement_should_return_unit (`statement body1, `in_body sexp))
 
-and make_proc env ~name ~usage args body =
+and parse_lambda ~usage ~sexp args body =
   let required, rest = 
     match args with
     | Sexp.List [] ->   [], None
-    | Sexp.Atom rest -> [], Some rest
+    | Sexp.Atom rest -> [], Some (Identifier.of_string rest)
     | Sexp.List args ->
       match
         List.fold args ~init:(`no_dot, []) ~f:(fun acc x ->
@@ -165,44 +193,47 @@ and make_proc env ~name ~usage args body =
           | ((`have_dot, _),    Sexp.Atom ".")
           | ((`have_rest _, _), Sexp.Atom  _ ) -> raise (usage ())
           | ((`no_dot, req),    Sexp.Atom ".") -> (`have_dot, req)
-          | ((`no_dot, req),    Sexp.Atom  x ) -> (`no_dot, x::req)
-          | ((`have_dot, req),  Sexp.Atom  x ) -> (`have_rest x, req))
+          | ((`no_dot, req),    Sexp.Atom  x ) -> 
+            (`no_dot, Identifier.of_string x :: req)
+          | ((`have_dot, req),  Sexp.Atom  x ) -> 
+            (`have_rest (Identifier.of_string x), req))
       with 
       | (`have_dot,       _  ) -> raise (usage ())
       | (`no_dot,         req) -> List.rev req, None
       | (`have_rest rest, req) -> List.rev req, Some rest
   in
-  let check_arg_symbol arg = 
-    if not (is_ident arg) then 
-      raise (Syntax_error (args, "parameters should begin with a colon (:)"))
-  in
-  List.iter required ~f:check_arg_symbol;
-  Option.iter rest ~f:check_arg_symbol;
-  Option.iter (List.find_a_dup ((Option.to_list rest) @ required)) ~f:(fun key->
-    raise (Duplicate_argument_name (`procedure name, key)));
+  Option.iter 
+    (List.find_a_dup ((Option.to_list rest) @ required)) 
+    ~f:(fun key-> raise (Duplicate_identifier (key, sexp)));
   let body1, body_rest =
-    match body with body1::body_rest -> body1, body_rest | [] -> raise (usage())
+    match body with 
+    | body1::body_rest -> body1, body_rest
+    | [] -> raise (usage())
   in
+  required, rest, body1, body_rest
+
+and make_proc ?name ~sexp env required rest body1 body_rest =
   let num_required = List.length required in
-  Procedure.create ~name (fun values ->
+  Procedure.create ?name ~code:sexp (fun values ->
     let env =
       let req_values, rest_values = List.split_n values num_required in
       let num_req_values = List.length req_values in
       if ((num_req_values<>num_required)||(rest=None && rest_values<>[])) then
         raise (Procedure.Arity_error 
-                 (`procedure name,
+                 (Procedure.identifier ~name ~code:(Some sexp),
                   `got (num_req_values + List.length rest_values), 
                   `expected num_required));
       let env_with_req_args =
-        List.fold2_exn required req_values ~init:env ~f:Env.add
+        List.fold2_exn required req_values ~init:env ~f:(fun env var value ->
+          Env.add env (var :> string) value)
       in
       match rest with
       | None      -> env_with_req_args
       | Some rest -> 
         let rest_values = Univ.create Uvar.univ_list rest_values in
-        Env.add env_with_req_args rest rest_values
+        Env.add env_with_req_args (rest :> string) rest_values
     in
-    eval_progn ~sexp:(Sexp.List body) env body1 body_rest)
+    eval_progn ~sexp env body1 body_rest)
 
 let repl ?prompt ?(env = Primitive.env) ic oc =
   let flush_after ?nl f x =

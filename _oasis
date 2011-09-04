@@ -24,7 +24,7 @@ Library scaml
   Path:        lib
   FindlibName: scaml
  # Pack:        true
-  Modules:Interpreter,Procedure,Univ,Uvar,Env,Undefined
+  Modules:Interpreter,Procedure,Univ,Uvar,Env,Identifier,Undefined
   BuildDepends: sexplib.syntax,
                 sexplib,
                 core,threads
